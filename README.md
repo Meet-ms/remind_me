@@ -2,6 +2,22 @@
 
 A new Flutter project.
 
+## Maps and place search
+
+Map tiles and place search use [Ola Maps](https://maps.olakrutrim.com). Put
+your API key in a `dart_defines.json` file in the project root (it is
+git-ignored):
+
+```json
+{ "OLA_MAPS_API_KEY": "your-key" }
+```
+
+and pass it when running or building:
+
+```
+flutter run --dart-define-from-file=dart_defines.json
+```
+
 ## Getting Started
 
 This project is a starting point for a Flutter application.

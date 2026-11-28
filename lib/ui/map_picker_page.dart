@@ -1,14 +1,16 @@
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:http/http.dart' as http;
+import 'package:maplibre/maplibre.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../models/condition.dart';
 import '../services/geofence_service.dart';
+import '../services/ola_maps.dart';
 import '../services/place_search.dart';
 import '../services/sensor_service.dart';
+import '../utils/geo.dart';
 
 // Shown until the user's own location is known.
-const _fallbackCenter = LatLng(19.0760, 72.8777); // Mumbai
+const _fallbackCenter = Geographic(lon: 72.8777, lat: 19.0760); // Mumbai
 
 /// Full-screen editor for a [LocationCondition]: pick the place on a map,
 /// search by name, set the radius and whether to trigger on arrive/leave.
@@ -21,13 +23,17 @@ class MapPickerPage extends StatefulWidget {
 }
 
 class _MapPickerPageState extends State<MapPickerPage> {
-  final _map = MapController();
   final _search = TextEditingController();
   final _label = TextEditingController();
+  MapController? _map;
+  // A camera move requested before the map existed.
+  Geographic? _pendingCenter;
+  String? _style;
+  String? _styleError;
   List<PlaceResult> _results = [];
   bool _searching = false;
   bool _locating = false;
-  LatLng? _point;
+  Geographic? _point;
   late double _radius;
   late LocationTrigger _trigger;
 
@@ -36,11 +42,12 @@ class _MapPickerPageState extends State<MapPickerPage> {
     super.initState();
     final i = widget.initial;
     if (i != null) {
-      _point = LatLng(i.latitude, i.longitude);
+      _point = Geographic(lon: i.longitude, lat: i.latitude);
       _label.text = i.label;
     }
     _radius = (i?.radiusMeters ?? 150).clamp(minGeofenceRadius, 2000);
     _trigger = i?.trigger ?? LocationTrigger.arrive;
+    _loadStyle();
     if (i == null) _goToMyLocation(select: false);
   }
 
@@ -48,27 +55,58 @@ class _MapPickerPageState extends State<MapPickerPage> {
   void dispose() {
     _search.dispose();
     _label.dispose();
-    _map.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadStyle() async {
+    if (!OlaMaps.isConfigured) {
+      setState(() => _styleError = 'Ola Maps API key is not set.');
+      return;
+    }
+    setState(() => _styleError = null);
+    try {
+      final style = await OlaMaps.loadStyle();
+      if (mounted) setState(() => _style = style);
+    } on http.ClientException catch (e) {
+      if (mounted) setState(() => _styleError = e.message);
+    } catch (_) {
+      if (mounted) setState(() => _styleError = 'Could not load the map.');
+    }
+  }
+
+  void _moveTo(Geographic p) {
+    final map = _map;
+    if (map == null) {
+      _pendingCenter = p;
+      return;
+    }
+    map.animateCamera(CameraUpdate.position(center: p, zoom: 16));
   }
 
   Future<void> _goToMyLocation({bool select = true}) async {
     setState(() => _locating = true);
-    final pos = await SensorService().currentPosition();
+    final problem = await SensorService.locationProblem(
+      requestPermission: true,
+    );
+    final pos = problem == null
+        ? await SensorService().currentPosition()
+        : null;
     if (!mounted) return;
     setState(() => _locating = false);
     if (pos == null) {
       if (select) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not get your location.')),
+          SnackBar(
+            content: Text(problem ?? 'Could not get your location. Try again.'),
+          ),
         );
       }
       return;
     }
-    final here = LatLng(pos.lat, pos.lon);
+    final here = Geographic(lon: pos.lon, lat: pos.lat);
     // Don't override a place the user already picked while we were locating.
     if (select || _point == null) {
-      _map.move(here, 16);
+      _moveTo(here);
       if (select) setState(() => _point = here);
     }
   }
@@ -79,7 +117,12 @@ class _MapPickerPageState extends State<MapPickerPage> {
     FocusScope.of(context).unfocus();
     setState(() => _searching = true);
     try {
-      final r = await PlaceSearch.search(q);
+      final near = _point;
+      final r = await PlaceSearch.search(
+        q,
+        nearLat: near?.lat,
+        nearLon: near?.lon,
+      );
       if (!mounted) return;
       setState(() => _results = r);
       if (r.isEmpty) {
@@ -97,14 +140,23 @@ class _MapPickerPageState extends State<MapPickerPage> {
     }
   }
 
-  void _choose(PlaceResult r) {
-    final p = LatLng(r.lat, r.lon);
-    setState(() {
-      _point = p;
-      _results = [];
-      if (_label.text.isEmpty) _label.text = r.name.split(',').first.trim();
-    });
-    _map.move(p, 16);
+  Future<void> _choose(PlaceResult r) async {
+    setState(() => _results = []);
+    try {
+      final place = await PlaceSearch.resolve(r);
+      if (!mounted) return;
+      final p = Geographic(lon: place.lon!, lat: place.lat!);
+      setState(() {
+        _point = p;
+        if (_label.text.isEmpty) _label.text = r.name.split(',').first.trim();
+      });
+      _moveTo(p);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open that place.')),
+      );
+    }
   }
 
   void _save() {
@@ -112,8 +164,8 @@ class _MapPickerPageState extends State<MapPickerPage> {
     Navigator.pop(
       context,
       LocationCondition(
-        latitude: p.latitude,
-        longitude: p.longitude,
+        latitude: p.lat,
+        longitude: p.lon,
         radiusMeters: _radius,
         trigger: _trigger,
         label: _label.text.trim(),
@@ -186,54 +238,81 @@ class _MapPickerPageState extends State<MapPickerPage> {
           Expanded(
             child: Stack(
               children: [
-                FlutterMap(
-                  mapController: _map,
-                  options: MapOptions(
-                    initialCenter: point ?? _fallbackCenter,
-                    initialZoom: point == null ? 11 : 16,
-                    onTap: (_, latLng) => setState(() => _point = latLng),
+                if (_style != null)
+                  MapLibreMap(
+                    options: MapOptions(
+                      style: MapStyle.json(_style!),
+                      initCamera: CameraUpdate.position(
+                        center: point ?? _fallbackCenter,
+                        zoom: point == null ? 11 : 16,
+                      ),
+                    ),
+                    onMapCreated: (c) {
+                      _map = c;
+                      final pending = _pendingCenter;
+                      if (pending != null) {
+                        _pendingCenter = null;
+                        _moveTo(pending);
+                      }
+                    },
+                    onClick: (e) => setState(() => _point = e.point),
+                    layers: [
+                      if (point != null)
+                        PolygonLayer(
+                          polygons: [
+                            Feature(
+                              geometry: Polygon.from([
+                                [
+                                  for (final (lat, lon) in circleRing(
+                                    point.lat,
+                                    point.lon,
+                                    _radius,
+                                  ))
+                                    Geographic(lon: lon, lat: lat),
+                                ],
+                              ]),
+                            ),
+                          ],
+                          color: .literal(
+                            theme.colorScheme.primary.withValues(alpha: 0.18),
+                          ),
+                          outlineColor: .literal(theme.colorScheme.primary),
+                        ),
+                      if (point != null)
+                        MarkerLayer(
+                          points: [Feature(geometry: Point(point))],
+                          icon: .iconData(
+                            Icons.location_on,
+                            color: theme.colorScheme.error,
+                          ),
+                          iconAnchor: const .literal(IconAnchor.bottom),
+                          iconAllowOverlap: const .literal(true),
+                        ),
+                    ],
+                  )
+                else
+                  Center(
+                    child: _styleError == null
+                        ? const CircularProgressIndicator()
+                        : Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(_styleError!),
+                              if (OlaMaps.isConfigured)
+                                TextButton(
+                                  onPressed: _loadStyle,
+                                  child: const Text('Retry'),
+                                ),
+                            ],
+                          ),
                   ),
-                  children: [
-                    TileLayer(
-                      urlTemplate:
-                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                      userAgentPackageName: 'com.example.remind_me',
-                    ),
-                    if (point != null)
-                      CircleLayer(
-                        circles: [
-                          CircleMarker(
-                            point: point,
-                            radius: _radius,
-                            useRadiusInMeter: true,
-                            color: theme.colorScheme.primary.withValues(
-                              alpha: 0.18,
-                            ),
-                            borderColor: theme.colorScheme.primary,
-                            borderStrokeWidth: 2,
-                          ),
-                        ],
-                      ),
-                    if (point != null)
-                      MarkerLayer(
-                        markers: [
-                          Marker(
-                            point: point,
-                            width: 44,
-                            height: 44,
-                            alignment: Alignment.topCenter,
-                            child: Icon(
-                              Icons.location_on,
-                              size: 44,
-                              color: theme.colorScheme.error,
-                            ),
-                          ),
-                        ],
-                      ),
-                    const SimpleAttributionWidget(
-                      source: Text('OpenStreetMap contributors'),
-                    ),
-                  ],
+                const Positioned(
+                  left: 8,
+                  bottom: 4,
+                  child: Text(
+                    '© Ola Maps © OpenStreetMap contributors',
+                    style: TextStyle(fontSize: 10),
+                  ),
                 ),
                 Positioned(
                   right: 12,
@@ -292,15 +371,26 @@ class _MapPickerPageState extends State<MapPickerPage> {
                       children: [
                         Text('Radius ${_radius.round()} m'),
                         Expanded(
-                          child: Slider(
-                            min: minGeofenceRadius,
-                            max: 2000,
-                            value: _radius,
-                            onChanged: (v) => setState(() => _radius = v),
+                          child: SliderTheme(
+                            data: SliderTheme.of(context).copyWith(
+                              tickMarkShape: SliderTickMarkShape.noTickMark,
+                            ),
+                            child: Slider(
+                              min: minGeofenceRadius,
+                              max: 2000,
+                              divisions: 199,
+                              value: _radius,
+                              onChanged: (v) => setState(() => _radius = v),
+                            ),
                           ),
                         ),
                       ],
                     ),
+                    if (_radius < reliableGeofenceRadius)
+                      Text(
+                        'Small radius: alerts may be late or missed.',
+                        style: theme.textTheme.bodySmall,
+                      ),
                     TextField(
                       controller: _label,
                       decoration: const InputDecoration(

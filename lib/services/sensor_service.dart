@@ -60,18 +60,44 @@ class SensorService {
     return s;
   }
 
-  Future<({double lat, double lon})?> currentPosition() async {
-    try {
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          timeLimit: Duration(seconds: 20),
-        ),
-      );
-      return (lat: pos.latitude, lon: pos.longitude);
-    } catch (_) {
-      return null;
+  /// Why a location fix is unavailable, or null if one should be obtainable.
+  /// Pass [requestPermission] only from the foreground UI.
+  static Future<String?> locationProblem({
+    bool requestPermission = false,
+  }) async {
+    if (!await Geolocator.isLocationServiceEnabled()) {
+      return 'Turn on Location in your phone settings.';
     }
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied && requestPermission) {
+      permission = await Geolocator.requestPermission();
+    }
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      return 'Location permission is needed. Allow it in app settings.';
+    }
+    return null;
+  }
+
+  /// Returns a fresh fix, trying high accuracy first (can be slow indoors)
+  /// and then falling back to a coarser or the last known position.
+  Future<({double lat, double lon})?> currentPosition() async {
+    for (final accuracy in [LocationAccuracy.high, LocationAccuracy.low]) {
+      try {
+        final pos = await Geolocator.getCurrentPosition(
+          locationSettings: LocationSettings(
+            accuracy: accuracy,
+            timeLimit: const Duration(seconds: 15),
+          ),
+        );
+        return (lat: pos.latitude, lon: pos.longitude);
+      } catch (_) {}
+    }
+    try {
+      final last = await Geolocator.getLastKnownPosition();
+      if (last != null) return (lat: last.latitude, lon: last.longitude);
+    } catch (_) {}
+    return null;
   }
 
   Future<String?> currentWifiName() async {

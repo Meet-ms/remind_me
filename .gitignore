@@ -1,48 +1,37 @@
-# Miscellaneous
-*.class
-*.log
-*.pyc
-*.swp
-.DS_Store
-.atom/
-.build/
-.buildlog/
-.history
-.svn/
-.swiftpm/
-migrate_working_dir/
-
-# IntelliJ related
-*.iml
-*.ipr
-*.iws
-.idea/
-
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
-
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
+# Flutter/Dart build output and tool caches
+/build/
 .dart_tool/
 .flutter-plugins-dependencies
-.pub-cache/
-.pub/
-/build/
+.widget_preview/
 /coverage/
 
-# Symbolication related
-app.*.symbols
+# Editor/IDE and OS files
+.idea/
+.vscode/
+*.iml
+.DS_Store
 
-# Obfuscation related
-app.*.map.json
+# Android generated/local files
+.gradle/
+.cxx/
+local.properties
+GeneratedPluginRegistrant.*
+/android/gradlew
+/android/gradlew.bat
+/android/gradle/wrapper/gradle-wrapper.jar
 
-# Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
+# iOS generated/local files
+/ios/Pods/
+/ios/Flutter/ephemeral/
+/ios/Flutter/Generated.xcconfig
+/ios/Flutter/flutter_export_environment.sh
+/ios/Flutter/.last_build_id
+xcuserdata/
 
-# Widget Preview related
-.widget_preview/
+# Signing keys: never track
+key.properties
+*.keystore
+*.jks
+
+# API keys passed with --dart-define-from-file
+dart_defines.json

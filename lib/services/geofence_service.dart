@@ -7,8 +7,9 @@ import 'evaluation_service.dart';
 import 'geofence_state_store.dart';
 import 'sensor_service.dart';
 
-// Android geofences are unreliable below roughly this radius.
-const minGeofenceRadius = 100.0;
+const minGeofenceRadius = 10.0;
+// Android geofences may fire late or miss below roughly this radius.
+const reliableGeofenceRadius = 100.0;
 
 /// Called by the OS when a registered geofence is entered or exited, even if
 /// the app is not running. Records the new state and re-evaluates reminders.
