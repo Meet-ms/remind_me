@@ -53,18 +53,20 @@ void _showRingPageWhileRinging() {
 class RemindMeApp extends StatelessWidget {
   const RemindMeApp({super.key});
 
+  static const _seedColor = Color(0xFF9B5CF6);
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: navigatorKey,
       title: 'Remind Me',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
+        colorScheme: ColorScheme.fromSeed(seedColor: _seedColor),
         useMaterial3: true,
       ),
       darkTheme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.indigo,
+          seedColor: _seedColor,
           brightness: Brightness.dark,
         ),
         useMaterial3: true,

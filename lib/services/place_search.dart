@@ -72,6 +72,20 @@ class PlaceSearch {
     return results;
   }
 
+  /// A short name for the place at the given point, or null if none is found.
+  static Future<String?> reverse(double lat, double lon) async {
+    final body = await _get('/places/v1/reverse-geocode', {
+      'latlng': '$lat,$lon',
+    });
+    final results = body['results'] as List? ?? const [];
+    if (results.isEmpty) return null;
+    final first = results.first as Map<String, dynamic>;
+    final name = (first['name'] as String?)?.trim() ?? '';
+    if (name.isNotEmpty) return name;
+    final address = (first['formatted_address'] as String?)?.trim() ?? '';
+    return address.isEmpty ? null : address.split(',').first.trim();
+  }
+
   /// Fills in coordinates for a result that has none yet.
   static Future<PlaceResult> resolve(PlaceResult r) async {
     if (r.lat != null && r.lon != null) return r;

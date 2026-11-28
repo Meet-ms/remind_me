@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bell" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.95"/>
+    </linearGradient>
+    <g id="bell-shape">
+      <circle cx="512" cy="250" r="36"/>
+      <path d="M512 280 C400 280 340 370 340 490 L340 600 C340 640 310 670 270 700 L270 730 L754 730 L754 700 C714 670 684 640 684 600 L684 490 C684 370 624 280 512 280 Z"/>
+      <path d="M432 765 A80 80 0 0 0 592 765 Z"/>
+    </g>
+    <mask id="not-bell" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect width="1024" height="1024" fill="#FFFFFF"/>
+      <use href="#bell-shape" fill="#000000"/>
+    </mask>
+  </defs>
+  <g transform="translate(512 512) scale(1.1) translate(-512 -512) translate(0 -18)" fill="url(#bell)">
+    <g mask="url(#not-bell)" opacity="0.17">
+      <use href="#bell-shape" transform="rotate(-22 512 250)"/>
+      <use href="#bell-shape" transform="rotate(22 512 250)"/>
+    </g>
+    <use href="#bell-shape"/>
+  </g>
+</svg>

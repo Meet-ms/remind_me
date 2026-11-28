@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:http/http.dart' as http;
 import 'package:maplibre/maplibre.dart';
 import 'package:material_ui/material_ui.dart';
@@ -36,6 +38,10 @@ class _MapPickerPageState extends State<MapPickerPage> {
   Geographic? _point;
   late double _radius;
   late LocationTrigger _trigger;
+  Timer? _nameTimer;
+  bool _naming = false;
+  // True while the label holds a looked-up name the user hasn't edited.
+  bool _labelAuto = false;
 
   @override
   void initState() {
@@ -44,6 +50,7 @@ class _MapPickerPageState extends State<MapPickerPage> {
     if (i != null) {
       _point = Geographic(lon: i.longitude, lat: i.latitude);
       _label.text = i.label;
+      if (i.label.isEmpty) _scheduleNameLookup();
     }
     _radius = (i?.radiusMeters ?? 150).clamp(minGeofenceRadius, 2000);
     _trigger = i?.trigger ?? LocationTrigger.arrive;
@@ -53,9 +60,47 @@ class _MapPickerPageState extends State<MapPickerPage> {
 
   @override
   void dispose() {
+    _nameTimer?.cancel();
     _search.dispose();
     _label.dispose();
     super.dispose();
+  }
+
+  /// Moves the pin. [lookup] is false when the caller already has a name.
+  void _setPoint(Geographic p, {bool lookup = true}) {
+    setState(() => _point = p);
+    if (lookup) {
+      _scheduleNameLookup();
+    } else {
+      _nameTimer?.cancel();
+    }
+  }
+
+  // Waits until the pin has stayed put before spending an API request.
+  void _scheduleNameLookup() {
+    _nameTimer?.cancel();
+    _nameTimer = Timer(const Duration(seconds: 3), _lookupName);
+  }
+
+  Future<void> _lookupName() async {
+    final p = _point;
+    if (p == null || !OlaMaps.isConfigured) return;
+    if (_label.text.isNotEmpty && !_labelAuto) return;
+    setState(() => _naming = true);
+    String? name;
+    try {
+      name = await PlaceSearch.reverse(p.lat, p.lon);
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() => _naming = false);
+    // Ignore the answer if the pin moved or the user typed meanwhile.
+    final stillHere = _point?.lat == p.lat && _point?.lon == p.lon;
+    final editable = _label.text.isEmpty || _labelAuto;
+    if (name == null || !stillHere || !editable) return;
+    setState(() {
+      _label.text = name!;
+      _labelAuto = true;
+    });
   }
 
   Future<void> _loadStyle() async {
@@ -107,7 +152,7 @@ class _MapPickerPageState extends State<MapPickerPage> {
     // Don't override a place the user already picked while we were locating.
     if (select || _point == null) {
       _moveTo(here);
-      if (select) setState(() => _point = here);
+      if (select) _setPoint(here);
     }
   }
 
@@ -146,10 +191,12 @@ class _MapPickerPageState extends State<MapPickerPage> {
       final place = await PlaceSearch.resolve(r);
       if (!mounted) return;
       final p = Geographic(lon: place.lon!, lat: place.lat!);
-      setState(() {
-        _point = p;
-        if (_label.text.isEmpty) _label.text = r.name.split(',').first.trim();
-      });
+      // A name picked from search wins over a looked-up one.
+      if (_label.text.isEmpty || _labelAuto) {
+        _label.text = r.name.split(',').first.trim();
+        _labelAuto = false;
+      }
+      _setPoint(p, lookup: false);
       _moveTo(p);
     } catch (_) {
       if (!mounted) return;
@@ -255,7 +302,7 @@ class _MapPickerPageState extends State<MapPickerPage> {
                         _moveTo(pending);
                       }
                     },
-                    onClick: (e) => setState(() => _point = e.point),
+                    onClick: (e) => _setPoint(e.point),
                     layers: [
                       if (point != null)
                         PolygonLayer(
@@ -393,9 +440,22 @@ class _MapPickerPageState extends State<MapPickerPage> {
                       ),
                     TextField(
                       controller: _label,
-                      decoration: const InputDecoration(
+                      onChanged: (_) => _labelAuto = false,
+                      decoration: InputDecoration(
                         labelText: 'Place name (optional)',
                         isDense: true,
+                        suffixIcon: _naming
+                            ? const Padding(
+                                padding: EdgeInsets.all(10),
+                                child: SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                              )
+                            : null,
                       ),
                     ),
                   ],
